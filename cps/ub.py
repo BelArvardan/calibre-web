@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from sqlalchemy import *
+from sqlalchemy import exc
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import *
 import os
@@ -20,41 +21,53 @@ ROLE_EDIT = 8
 ROLE_PASSWD = 16
 DEFAULT_PASS = "admin123"
 
+
 class User(Base):
     __tablename__ = 'user'
 
-    id = Column(Integer, primary_key = True)
-    nickname = Column(String(64), unique = True)
-    email = Column(String(120), unique = True, default = "")
-    role = Column(SmallInteger, default = ROLE_USER)
+    id = Column(Integer, primary_key=True)
+    nickname = Column(String(64), unique=True)
+    email = Column(String(120), unique=True, default="")
+    role = Column(SmallInteger, default=ROLE_USER)
     password = Column(String)
     kindle_mail = Column(String(120), default="")
-    shelf = relationship('Shelf', backref = 'user', lazy = 'dynamic')
-    whislist = relationship('Whislist', backref = 'user', lazy = 'dynamic')
-    downloads = relationship('Downloads', backref= 'user', lazy = 'dynamic')
+    shelf = relationship('Shelf', backref='user', lazy='dynamic')
+    downloads = relationship('Downloads', backref='user', lazy='dynamic')
+    locale = Column(String(2), default="en")
+    random_books = Column(Integer, default=1)
+    language_books = Column(Integer, default=1)
+    series_books = Column(Integer, default=1)
+    category_books = Column(Integer, default=1)
+    hot_books = Column(Integer, default=1)
+    default_language = Column(String(3), default="all")
 
     def is_authenticated(self):
         return True
+
     def role_admin(self):
         if self.role is not None:
             return True if self.role & ROLE_ADMIN == ROLE_ADMIN else False
         else:
             return False
+
     def role_download(self):
         if self.role is not None:
             return True if self.role & ROLE_DOWNLOAD == ROLE_DOWNLOAD else False
         else:
             return False
+
     def role_upload(self):
         if self.role is not None:
             return True if self.role & ROLE_UPLOAD == ROLE_UPLOAD else False
         else:
             return False
+
     def role_edit(self):
         if self.role is not None:
             return True if self.role & ROLE_EDIT == ROLE_EDIT else False
         else:
             return False
+
     def role_passwd(self):
         if self.role is not None:
             return True if self.role & ROLE_PASSWD == ROLE_PASSWD else False
@@ -70,45 +83,49 @@ class User(Base):
     def get_id(self):
         return unicode(self.id)
 
+    def filter_language(self):
+        return self.default_language
+
+    def show_random_books(self):
+        return self.random_books
+
+    def show_language(self):
+        return self.language_books
+
+    def show_hot_books(self):
+        return self.hot_books
+
+    def show_series(self):
+        return self.series_books
+
+    def show_category(self):
+        return self.category_books
+
     def __repr__(self):
-        return '<User %r>' % (self.nickname)
+        return '<User %r>' % self.nickname
+
 
 class Shelf(Base):
     __tablename__ = 'shelf'
 
-    id = Column(Integer, primary_key = True)
+    id = Column(Integer, primary_key=True)
     name = Column(String)
     is_public = Column(Integer, default=0)
     user_id = Column(Integer, ForeignKey('user.id'))
 
     def __repr__(self):
-        return '<Shelf %r>' % (self.name)
-
-
-class Whislist(Base):
-    __tablename__ = "wishlist"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-    is_public = Column(String)
-    user_id = Column(Integer, ForeignKey('user.id'))
-
-    def __init__(self):
-        pass
-
-    def __repr__(self):
-        return '<Whislist %r>' % (self.name)
-
+        return '<Shelf %r>' % self.name
 
 class BookShelf(Base):
     __tablename__ = 'book_shelf_link'
 
     id = Column(Integer, primary_key=True)
     book_id = Column(Integer)
+    order = Column(Integer)
     shelf = Column(Integer, ForeignKey('shelf.id'))
 
     def __repr__(self):
-        return '<Book %r>' % (self.id)
+        return '<Book %r>' % self.id
 
 
 class Downloads(Base):
@@ -119,18 +136,7 @@ class Downloads(Base):
     user_id = Column(Integer, ForeignKey('user.id'))
 
     def __repr__(self):
-        return '<Download %r' % (self.book_id)
-
-class Whish(Base):
-    __tablename__ = 'whish'
-
-    id = Column(Integer, primary_key=True)
-    title = Column(String)
-    url = Column(String)
-    wishlist = Column(Integer, ForeignKey('wishlist.id'))
-
-    def __repr__(self):
-        return '<Whish %r>' % (self.title)
+        return '<Download %r' % self.book_id
 
 class Settings(Base):
     __tablename__ = 'settings'
@@ -147,6 +153,36 @@ class Settings(Base):
         #return '<Smtp %r>' % (self.mail_server)
         pass
 
+
+def migrate_Database():
+    try:
+        session.query(exists().where(User.random_books)).scalar()
+        session.commit()
+    except exc.OperationalError:  # Database is not compatible, some rows are missing
+        conn = engine.connect()
+        conn.execute("ALTER TABLE user ADD column random_books INTEGER DEFAULT 1")
+        conn.execute("ALTER TABLE user ADD column locale String(2) DEFAULT 'en'")
+        conn.execute("ALTER TABLE user ADD column default_language String(3) DEFAULT 'all'")
+        session.commit()
+    try:
+        session.query(exists().where(User.language_books)).scalar()
+        session.commit()
+    except exc.OperationalError:  # Database is not compatible, some rows are missing
+        conn = engine.connect()
+        conn.execute("ALTER TABLE user ADD column language_books INTEGER DEFAULT 1")
+        conn.execute("ALTER TABLE user ADD column series_books INTEGER DEFAULT 1")
+        conn.execute("ALTER TABLE user ADD column category_books INTEGER DEFAULT 1")
+        conn.execute("ALTER TABLE user ADD column hot_books INTEGER DEFAULT 1")
+        session.commit()
+    try:
+        session.query(exists().where(BookShelf.order)).scalar()
+        session.commit()
+    except exc.OperationalError:  # Database is not compatible, some rows are missing
+        conn = engine.connect()
+        conn.execute("ALTER TABLE book_shelf_link ADD column `order` INTEGER DEFAULT 1")
+        session.commit()
+
+
 def create_default_config():
     settings = Settings()
     settings.mail_server = "mail.example.com"
@@ -159,22 +195,24 @@ def create_default_config():
     session.add(settings)
     session.commit()
 
+
 def get_mail_settings():
     settings = session.query(Settings).first()
 
     if not settings:
-      return {}
+        return {}
 
     data = {
-      'mail_server': settings.mail_server,
-      'mail_port': settings.mail_port,
-      'mail_use_ssl': settings.mail_use_ssl,
-      'mail_login': settings.mail_login,
-      'mail_password': settings.mail_password,
-      'mail_from': settings.mail_from
+        'mail_server': settings.mail_server,
+        'mail_port': settings.mail_port,
+        'mail_use_ssl': settings.mail_use_ssl,
+        'mail_login': settings.mail_login,
+        'mail_password': settings.mail_password,
+        'mail_from': settings.mail_from
     }
 
     return data
+
 
 def create_admin_user():
     user = User()
@@ -200,4 +238,5 @@ if not os.path.exists(dbpath):
         create_admin_user()
     except Exception:
         pass
-
+else:
+    migrate_Database()
